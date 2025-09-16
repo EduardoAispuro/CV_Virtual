@@ -1,0 +1,78 @@
+services:
+  # PostgreSQL Database (Development)
+  db-dev:
+    image: postgres:15-alpine
+    container_name: cv-database-dev
+    environment:
+      - POSTGRES_DB=cvproject
+      - POSTGRES_USER=cvuser
+      - POSTGRES_PASSWORD=cvpassword
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - cv-dev-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cvuser -d cvproject"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # Backend Flask API (Development)
+  backend-dev:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cv-backend-dev
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=development
+      - FLASK_DEBUG=True
+      - DATABASE_URL=postgresql://cvuser:cvpassword@db-dev:5432/cvproject
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-sk_test_your_stripe_secret_key_here}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY:-pk_test_your_stripe_publishable_key_here}
+      - SECRET_KEY=${SECRET_KEY:-dev_secret_key_change_me}
+    volumes:
+      - ./backend:/app:ro
+      - ./backend/.env:/app/.env:ro
+    depends_on:
+      db-dev:
+        condition: service_healthy
+    networks:
+      - cv-dev-network
+    restart: unless-stopped
+    command: ["python", "-u", "app.py"]
+
+  # Frontend React App (Development with hot reload)
+  frontend-dev:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: cv-frontend-dev
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:5000
+    volumes:
+      - ./frontend:/app:cached
+      - /app/node_modules
+    depends_on:
+      - backend-dev
+    networks:
+      - cv-dev-network
+    restart: unless-stopped
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+
+networks:
+  cv-dev-network:
+    driver: bridge
+    name: cv-project-dev-network
+
+volumes:
+  postgres_dev_data:
+    name: cv-postgres-dev-data
